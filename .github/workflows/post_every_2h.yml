@@ -1,0 +1,59 @@
+name: Post to Instagram every 2 hours
+
+on:
+  schedule:
+    # GitHub cron is UTC. Every 2 hours = 12 runs/day (under IG's 25/day API cap).
+    - cron: "0 */2 * * *"
+  workflow_dispatch: {}   # lets you trigger a run manually from the Actions tab
+
+permissions:
+  contents: write   # needed to commit newly rendered assets back to the repo
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg + deps
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          pip install -r requirements.txt
+
+      # PUBLIC_BASE_URL is not sensitive (it's just this repo's public CDN
+      # path), so it's hardcoded here rather than requiring a repo secret —
+      # keeps the trial runnable with zero secrets configured.
+      - name: Render this run's post (step 1)
+        env:
+          PUBLIC_BASE_URL: https://cdn.jsdelivr.net/gh/pruthvi-builds/closer-code-engine@main/assets/renders
+        run: python scripts/main.py render
+
+      - name: Commit + push rendered assets so they go public
+        run: |
+          git config user.name "content-bot"
+          git config user.email "content-bot@users.noreply.github.com"
+          git add assets/renders content_data
+          git diff --cached --quiet || git commit -m "Auto render $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          git push
+
+      - name: Wait for jsDelivr CDN to pick up the new commit
+        run: sleep 90
+
+      # DRY_RUN is hardcoded true for this trial so it runs safely with zero
+      # secrets configured (an empty/unset secret would NOT fall back to
+      # "true" automatically, so this must be explicit). Once you've
+      # completed Meta's approval process (see README) and want to go live:
+      # add IG_USER_ID / IG_ACCESS_TOKEN as repo secrets under Settings ->
+      # Secrets and variables -> Actions, then change the line below to
+      # DRY_RUN: "false".
+      - name: Publish to Instagram (step 2)
+        env:
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          DRY_RUN: "true"
+          PUBLIC_BASE_URL: https://cdn.jsdelivr.net/gh/pruthvi-builds/closer-code-engine@main/assets/renders
+        run: python scripts/main.py publish
