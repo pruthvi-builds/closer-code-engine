@@ -29,6 +29,11 @@ def _post(endpoint, payload):
     url = f"{GRAPH_URL}/{endpoint}"
     payload = {**payload, "access_token": config.IG_ACCESS_TOKEN}
     resp = requests.post(url, data=payload, timeout=60)
+    if not resp.ok:
+        # Surface Meta's actual error body (reason/code/message) instead of
+        # just the bare status code — this is what was missing when
+        # diagnosing the first failed scheduled run.
+        print(f"Graph API error {resp.status_code} for {endpoint}: {resp.text}")
     resp.raise_for_status()
     return resp.json()
 
