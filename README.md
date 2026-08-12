@@ -1,6 +1,6 @@
 # Closer Code Engine
 
-Fully free, code-level content automation for `@built_by_pruthvi`. Produces one
+Fully free, code-level content automation for `@the_closer_code`. Produces one
 consistent format — a static black-background/white-text quote reel — and posts
 it automatically every 2 hours via Instagram's official Graph API.
 
