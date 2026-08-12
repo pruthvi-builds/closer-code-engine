@@ -1,0 +1,40 @@
+name: Generate fresh content hooks
+
+on:
+  schedule:
+    # Every day at 03:00 UTC - refills the reel_hooks pool with a new
+    # batch before it would otherwise start repeating. Runs daily and generates
+    # more than the 12/day posting rate, so the pool keeps growing net-positive
+    # instead of just barely keeping pace.
+    - cron: "0 3 * * *"
+  workflow_dispatch: {}   # lets you trigger a refresh manually anytime
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Generate a new batch of hooks
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          HOOK_BATCH_SIZE: "15"
+        run: python scripts/generate_hooks.py
+
+      - name: Commit + push updated hook bank
+        run: |
+          git config user.name "content-bot"
+          git config user.email "content-bot@users.noreply.github.com"
+          git add content_data/hooks_bank.json
+          git diff --cached --quiet || git commit -m "Auto-generate new content hooks $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          git push
