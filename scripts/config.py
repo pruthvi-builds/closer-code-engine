@@ -7,8 +7,8 @@ Everything else reads from this file so you only configure once.
 import os
 
 # ---- Brand ----
-BRAND_NAME = "Built By Pruthvi"
-HANDLE = "@built_by_pruthvi"          # your IG handle (posting target)
+BRAND_NAME = "The Closer Code"
+HANDLE = "@the_closer_code"          # your IG handle (posting target)
 NICHE = "cold calling / sales closing"
 LINK_IN_BIO_CTA = "Link in bio \U0001F447"   # 👇 (used in real IG captions, which render emoji natively)
 LINK_IN_BIO_CTA_IMAGE_SAFE = "LINK IN BIO >>"  # used when drawing text ONTO images (PIL fonts can't render emoji)
