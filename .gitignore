@@ -8,8 +8,4 @@ content_data/content_log.csv
 content_data/rotation_state.txt
 content_data/palette_index.txt
 content_data/pending_publish.json
-# Old local test renders from development aren't pushed — the workflow
-# generates and commits fresh ones on each run so they're publicly
-# reachable via jsDelivr.
-assets/renders/*
-!assets/renders/.gitkeep
+
