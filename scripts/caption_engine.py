@@ -34,6 +34,17 @@ def _append_log(content_id, content_type):
         writer.writerow([datetime.utcnow().isoformat(), content_id, content_type])
 
 
+def mark_posted(content_id, content_type):
+    """Record a content id as used ONLY after it has actually been
+    published successfully. Picking a hook and logging it as used used to
+    happen in the same step as choosing it (see next_reel below) -- which
+    meant a hook got silently burned from the rotation any time a later
+    step failed (render crash, CDN timeout, Graph API error), even though
+    it was never actually posted. Callers should invoke this explicitly
+    after a confirmed successful publish, not at pick time."""
+    _append_log(content_id, content_type)
+
+
 def _pick(pool_name):
     bank = _load_bank()
     used = set(_load_log())
@@ -50,10 +61,10 @@ def next_reel():
     used for posts — different crowd, different angle, same underlying
     ideas."""
     hook = _pick("reel_hooks")
-    _append_log(hook["id"], "reel")
     caption = f"{hook['caption']}\n\n{config.HASHTAGS}"
     return {
         "type": "reel",
+        "id": hook["id"],
         "headline": hook["quote"],
         "trigger_word": hook["emphasis"][0] if hook.get("emphasis") else None,
         "caption": caption,

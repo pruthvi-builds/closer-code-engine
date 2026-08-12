@@ -59,7 +59,18 @@ def render():
     out_path = os.path.join(config.RENDER_DIR, fname)
     compose_reel.render_reel(content["headline"], out_path,
                               trigger_word=content.get("trigger_word"))
-    pending = {"type": "reel", "urls": [f"{PUBLIC_BASE_URL}/{os.path.basename(out_path)}"], "caption": content["caption"]}
+    # content["id"] is carried through to publish() so the hook only gets
+    # marked "used" in content_log.csv after a CONFIRMED successful publish
+    # -- not here at pick/render time. See caption_engine.mark_posted() for
+    # why: logging at pick time meant a render crash, CDN timeout, or Graph
+    # API error would silently burn a hook from rotation despite it never
+    # actually being posted.
+    pending = {
+        "type": "reel",
+        "id": content["id"],
+        "urls": [f"{PUBLIC_BASE_URL}/{os.path.basename(out_path)}"],
+        "caption": content["caption"],
+    }
 
     pending_path = os.path.join(config.CONTENT_DATA_DIR, "pending_publish.json")
     with open(pending_path, "w") as f:
@@ -87,6 +98,13 @@ def _wait_until_public(url: str, max_wait: int = 480, interval: int = 10):
             r = requests.head(url, timeout=15, allow_redirects=True)
             if r.status_code == 200 and int(r.headers.get("content-length", "1")) > 0:
                 print(f"Public URL is live after {elapsed}s: {url}")
+                # Small extra buffer: our own HEAD check confirms this one
+                # vantage point sees the file, but jsDelivr is a multi-POP
+                # CDN and Meta's fetcher hits it from a different network
+                # path than this GitHub Actions runner. A short pause here
+                # gives edge caches a moment to catch up before handing the
+                # URL to the Graph API.
+                time.sleep(10)
                 return True
         except requests.RequestException as exc:
             print(f"[{elapsed}s] not reachable yet ({exc.__class__.__name__}), retrying...")
@@ -108,6 +126,11 @@ def publish():
     _wait_until_public(pending["urls"][0])
 
     result = ig_poster.publish_reel(pending["urls"][0], pending["caption"])
+
+    # Only now -- after a confirmed successful call (publish_reel raises on
+    # any Graph API error, so reaching this line means it actually worked,
+    # or DRY_RUN legitimately no-op'd) -- record this hook as used.
+    caption_engine.mark_posted(pending["id"], "reel")
 
     print("Result:", json.dumps(result, indent=2))
     return result

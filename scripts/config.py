@@ -77,7 +77,7 @@ AUDIO_DURATION_PAD = 0.5  # seconds of extra bed rendered beyond video length, t
 # ---- Instagram Graph API (fill via environment variables / GitHub secrets) ----
 IG_USER_ID = os.environ.get("IG_USER_ID", "")          # Instagram Business Account ID
 IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN", "")  # long-lived Page access token
-GRAPH_API_VERSION = "v21.0"
+GRAPH_API_VERSION = "v23.0"  # bumped from v21.0 -- Meta retires old API versions on a rolling ~2yr cycle, keep this reasonably current
 
 # If True, scripts generate content but skip the actual publish call
 # (use this until your Meta app is approved / tokens are set).

@@ -48,7 +48,15 @@ def _mux_audio(video_path: str, wav_path: str, out_path: str):
         "-shortest",
         out_path,
     ]
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Capture stderr instead of discarding it -- ffmpeg failures used to
+    # crash with a bare CalledProcessError and zero diagnostic output,
+    # making a bad render undebuggable from the Action log alone.
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg audio mux failed (exit {proc.returncode}):\n"
+            f"{proc.stderr.decode(errors='replace')[-2000:]}"
+        )
 
 
 def render_reel(headline: str, out_path: str, trigger_word: str = None, post_index: int = 0, duration=DURATION, kicker: str = None):

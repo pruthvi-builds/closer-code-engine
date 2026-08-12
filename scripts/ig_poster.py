@@ -24,29 +24,65 @@ import config
 
 GRAPH_URL = f"https://graph.facebook.com/{config.GRAPH_API_VERSION}"
 
+# Transient-failure retry: a single dropped connection or a momentary 5xx
+# from Meta used to kill the entire 2-hour posting cycle outright with no
+# retry. These are exactly the kind of blips that resolve themselves a few
+# seconds later, so retry a handful of times with backoff before giving up
+# for real. Real errors (bad token, invalid media, etc.) come back as 4xx
+# and are NOT retried -- they fail immediately, same as before.
+_MAX_RETRIES = 3
+_RETRY_BACKOFF = 5  # seconds, multiplied by attempt number
+
 
 def _post(endpoint, payload):
     url = f"{GRAPH_URL}/{endpoint}"
     payload = {**payload, "access_token": config.IG_ACCESS_TOKEN}
-    resp = requests.post(url, data=payload, timeout=60)
-    if not resp.ok:
-        # Surface Meta's actual error body (reason/code/message) instead of
-        # just the bare status code — this is what was missing when
-        # diagnosing the first failed scheduled run.
-        print(f"Graph API error {resp.status_code} for {endpoint}: {resp.text}")
-    resp.raise_for_status()
-    return resp.json()
+    last_exc = None
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            resp = requests.post(url, data=payload, timeout=60)
+        except requests.RequestException as exc:
+            last_exc = exc
+            print(f"[attempt {attempt}/{_MAX_RETRIES}] network error posting to {endpoint}: {exc}")
+            time.sleep(_RETRY_BACKOFF * attempt)
+            continue
+
+        if not resp.ok:
+            # Surface Meta's actual error body (reason/code/message) instead of
+            # just the bare status code — this is what was missing when
+            # diagnosing the first failed scheduled run.
+            print(f"Graph API error {resp.status_code} for {endpoint}: {resp.text}")
+            if resp.status_code >= 500 and attempt < _MAX_RETRIES:
+                print(f"[attempt {attempt}/{_MAX_RETRIES}] server error, retrying...")
+                time.sleep(_RETRY_BACKOFF * attempt)
+                continue
+        resp.raise_for_status()
+        return resp.json()
+    raise last_exc or RuntimeError(f"Failed to reach {endpoint} after {_MAX_RETRIES} attempts")
 
 
 def _wait_until_ready(container_id, max_wait=120):
     """Poll a media container until status_code == FINISHED (required for video/reels)."""
     elapsed = 0
     while elapsed < max_wait:
-        r = requests.get(
-            f"{GRAPH_URL}/{container_id}",
-            params={"fields": "status_code", "access_token": config.IG_ACCESS_TOKEN},
-            timeout=30,
-        )
+        try:
+            r = requests.get(
+                f"{GRAPH_URL}/{container_id}",
+                params={"fields": "status_code", "access_token": config.IG_ACCESS_TOKEN},
+                timeout=30,
+            )
+        except requests.RequestException as exc:
+            print(f"[{elapsed}s] error checking container status ({exc.__class__.__name__}: {exc}), retrying...")
+            time.sleep(5)
+            elapsed += 5
+            continue
+
+        if not r.ok:
+            # Surface the real error body instead of silently treating it as
+            # "not ready yet" and burning the full timeout before failing.
+            print(f"Graph API error {r.status_code} checking container {container_id}: {r.text}")
+            r.raise_for_status()
+
         status = r.json().get("status_code")
         if status == "FINISHED":
             return True

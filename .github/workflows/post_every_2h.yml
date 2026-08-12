@@ -14,9 +14,19 @@ on:
 permissions:
   contents: write   # needed to commit newly rendered assets back to the repo
 
+# Serialize runs instead of letting an overlapping manual trigger race a
+# scheduled run (or vice versa) -- concurrent jobs both doing "git add,
+# commit, push" to main can conflict on the push, and worse, could
+# theoretically publish two posts in the same window. Queue instead of
+# canceling, so a manual trigger never eats a real scheduled post.
+concurrency:
+  group: post-to-instagram
+  cancel-in-progress: false
+
 jobs:
   post:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +53,15 @@ jobs:
           git config user.email "content-bot@users.noreply.github.com"
           git add assets/renders content_data
           git diff --cached --quiet || git commit -m "Auto render $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          git push
+          # Retry on push rejection (e.g. another run pushed in between)
+          # instead of failing the whole job outright -- rebase onto
+          # whatever's now on main and try again, a few times.
+          for i in 1 2 3 4 5; do
+            git push && break
+            echo "push rejected, rebasing and retrying ($i/5)..."
+            git pull --rebase origin main
+            sleep $((i * 5))
+          done
 
       - name: Wait for jsDelivr CDN to pick up the new commit
         run: sleep 90
