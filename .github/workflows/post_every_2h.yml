@@ -54,6 +54,6 @@ jobs:
         env:
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
-          DRY_RUN: "true"
+          DRY_RUN: "false"
           PUBLIC_BASE_URL: https://cdn.jsdelivr.net/gh/pruthvi-builds/closer-code-engine@main/assets/renders
         run: python scripts/main.py publish
