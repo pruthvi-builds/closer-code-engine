@@ -3,7 +3,12 @@ name: Post to Instagram every 2 hours
 on:
   schedule:
     # GitHub cron is UTC. Every 2 hours = 12 runs/day (under IG's 25/day API cap).
-    - cron: "0 */2 * * *"
+    # Offset 13 minutes past the hour on purpose -- GitHub's own docs say
+    # scheduled workflows are most likely to be delayed right at the top of
+    # every hour (":00"), since that's when the highest volume of scheduled
+    # jobs across all of GitHub fire at once. Running at :13 instead avoids
+    # that congestion spike and keeps the actual post time close to on-time.
+    - cron: "13 */2 * * *"
   workflow_dispatch: {}   # lets you trigger a run manually from the Actions tab
 
 permissions:

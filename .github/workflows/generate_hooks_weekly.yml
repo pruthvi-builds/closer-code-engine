@@ -2,11 +2,13 @@ name: Generate fresh content hooks
 
 on:
   schedule:
-    # Every day at 03:00 UTC - refills the reel_hooks pool with a new
+    # Every day at 03:11 UTC - refills the reel_hooks pool with a new
     # batch before it would otherwise start repeating. Runs daily and generates
     # more than the 12/day posting rate, so the pool keeps growing net-positive
-    # instead of just barely keeping pace.
-    - cron: "0 3 * * *"
+    # instead of just barely keeping pace. Offset 11 minutes past the hour for
+    # the same reason as post_every_2h.yml -- avoids GitHub's top-of-hour
+    # scheduling congestion.
+    - cron: "11 3 * * *"
   workflow_dispatch: {}   # lets you trigger a refresh manually anytime
 
 permissions:
