@@ -2,13 +2,17 @@ name: Post to Instagram every 2 hours
 
 on:
   schedule:
-    # GitHub cron is UTC. Every 2 hours = 12 runs/day (under IG's 25/day API cap).
-    # Offset 13 minutes past the hour on purpose -- GitHub's own docs say
-    # scheduled workflows are most likely to be delayed right at the top of
-    # every hour (":00"), since that's when the highest volume of scheduled
-    # jobs across all of GitHub fire at once. Running at :13 instead avoids
-    # that congestion spike and keeps the actual post time close to on-time.
-    - cron: "13 */2 * * *"
+    # GitHub's own scheduler has proven unreliable for this repo -- it has
+    # gone completely silent for 8+ hours at a stretch despite a correctly
+    # configured "every 2 hours" cron. Rather than depend on GitHub hitting
+    # one exact instant every 2 hours, this fires 3x/hour (every ~20 min,
+    # offset off the top-of-hour congestion window) and an internal gate
+    # (see "Check if a post is due" below) decides whether it's actually
+    # time to post. This gives GitHub's scheduler 6 chances per 2-hour
+    # window instead of 1 -- a full posting gap now requires 6 consecutive
+    # missed slots instead of 1. "Not due" runs exit in a few seconds and
+    # cost nothing extra (public repos get unlimited free Actions minutes).
+    - cron: "7,27,47 * * * *"
   workflow_dispatch: {}   # lets you trigger a run manually from the Actions tab
 
 permissions:
@@ -34,7 +38,40 @@ jobs:
         with:
           python-version: "3.11"
 
+      # Cheap, fast gate that runs BEFORE installing ffmpeg/deps so a
+      # "not due yet" run finishes in seconds. Reads the timestamp of the
+      # last CONFIRMED successful post (content_data/content_log.csv only
+      # gets a row written after a real successful publish -- see
+      # caption_engine.mark_posted) and only proceeds if at least ~110
+      # minutes have passed. workflow_dispatch (manual trigger) always
+      # bypasses the gate, so manual runs never get silently skipped.
+      - name: Check if a post is due
+        id: gate
+        run: |
+          python3 - << 'PYEOF'
+          import csv, datetime, os
+
+          if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
+              due, reason = True, "manual trigger -- always runs"
+          else:
+              path = "content_data/content_log.csv"
+              due, reason = True, "no post log yet"
+              if os.path.exists(path):
+                  with open(path) as f:
+                      rows = list(csv.DictReader(f))
+                  if rows:
+                      last_ts = datetime.datetime.fromisoformat(rows[-1]["timestamp"])
+                      elapsed_min = (datetime.datetime.utcnow() - last_ts).total_seconds() / 60
+                      due = elapsed_min >= 110
+                      reason = f"last confirmed post was {elapsed_min:.1f} min ago"
+
+          print(f"{reason} -> due={due}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"due={'true' if due else 'false'}\n")
+          PYEOF
+
       - name: Install ffmpeg + deps
+        if: steps.gate.outputs.due == 'true'
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
           pip install -r requirements.txt
@@ -43,11 +80,13 @@ jobs:
       # path), so it's hardcoded here rather than requiring a repo secret —
       # keeps the trial runnable with zero secrets configured.
       - name: Render this run's post (step 1)
+        if: steps.gate.outputs.due == 'true'
         env:
           PUBLIC_BASE_URL: https://cdn.jsdelivr.net/gh/pruthvi-builds/closer-code-engine@main/assets/renders
         run: python scripts/main.py render
 
       - name: Commit + push rendered assets so they go public
+        if: steps.gate.outputs.due == 'true'
         run: |
           git config user.name "content-bot"
           git config user.email "content-bot@users.noreply.github.com"
@@ -64,6 +103,7 @@ jobs:
           done
 
       - name: Wait for jsDelivr CDN to pick up the new commit
+        if: steps.gate.outputs.due == 'true'
         run: sleep 90
 
       # DRY_RUN is hardcoded true for this trial so it runs safely with zero
@@ -74,9 +114,31 @@ jobs:
       # Secrets and variables -> Actions, then change the line below to
       # DRY_RUN: "false".
       - name: Publish to Instagram (step 2)
+        if: steps.gate.outputs.due == 'true'
         env:
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
           DRY_RUN: "false"
           PUBLIC_BASE_URL: https://cdn.jsdelivr.net/gh/pruthvi-builds/closer-code-engine@main/assets/renders
         run: python scripts/main.py publish
+
+      # main.py publish() only marks a hook "used" in content_log.csv AFTER
+      # a confirmed successful publish (see caption_engine.mark_posted) --
+      # which happens AFTER the "Commit + push rendered assets" step above
+      # already ran. Without this second commit, that write only exists in
+      # the ephemeral runner filesystem and is lost when the job ends,
+      # silently breaking both the anti-repeat log and this workflow's own
+      # "is a post due" gate (both read content_log.csv's last timestamp).
+      - name: Commit + push the updated content log
+        if: steps.gate.outputs.due == 'true'
+        run: |
+          git config user.name "content-bot"
+          git config user.email "content-bot@users.noreply.github.com"
+          git add content_data/content_log.csv
+          git diff --cached --quiet || git commit -m "Log confirmed post $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          for i in 1 2 3 4 5; do
+            git push && break
+            echo "push rejected, rebasing and retrying ($i/5)..."
+            git pull --rebase origin main
+            sleep $((i * 5))
+          done
