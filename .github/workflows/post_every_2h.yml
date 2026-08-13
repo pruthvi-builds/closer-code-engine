@@ -43,27 +43,33 @@ jobs:
       # last CONFIRMED successful post (content_data/content_log.csv only
       # gets a row written after a real successful publish -- see
       # caption_engine.mark_posted) and only proceeds if at least ~110
-      # minutes have passed. workflow_dispatch (manual trigger) always
-      # bypasses the gate, so manual runs never get silently skipped.
+      # minutes have passed. Applies to every trigger source uniformly.
       - name: Check if a post is due
         id: gate
         run: |
           python3 - << 'PYEOF'
           import csv, datetime, os
 
-          if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
-              due, reason = True, "manual trigger -- always runs"
-          else:
-              path = "content_data/content_log.csv"
-              due, reason = True, "no post log yet"
-              if os.path.exists(path):
-                  with open(path) as f:
-                      rows = list(csv.DictReader(f))
-                  if rows:
-                      last_ts = datetime.datetime.fromisoformat(rows[-1]["timestamp"])
-                      elapsed_min = (datetime.datetime.utcnow() - last_ts).total_seconds() / 60
-                      due = elapsed_min >= 110
-                      reason = f"last confirmed post was {elapsed_min:.1f} min ago"
+          # IMPORTANT: workflow_dispatch is no longer a "human clicked a
+          # button" signal -- cron-job.org calls this same trigger via the
+          # GitHub API every ~15 minutes as our reliability heartbeat (see
+          # the schedule comment above). If workflow_dispatch bypassed the
+          # gate, EVERY heartbeat would post, which is exactly the
+          # over-posting bug this fixes. The elapsed-time gate now applies
+          # uniformly regardless of what triggered the run. A genuine
+          # manual test can still force a post at any time by deleting the
+          # last row of content_data/content_log.csv first, or just editing
+          # this file temporarily.
+          path = "content_data/content_log.csv"
+          due, reason = True, "no post log yet"
+          if os.path.exists(path):
+              with open(path) as f:
+                  rows = list(csv.DictReader(f))
+              if rows:
+                  last_ts = datetime.datetime.fromisoformat(rows[-1]["timestamp"])
+                  elapsed_min = (datetime.datetime.utcnow() - last_ts).total_seconds() / 60
+                  due = elapsed_min >= 110
+                  reason = f"last confirmed post was {elapsed_min:.1f} min ago"
 
           print(f"{reason} -> due={due}")
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
